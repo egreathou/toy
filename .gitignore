@@ -1,0 +1,48 @@
+# ==============================================================================
+# Cross-Platform C++ & Crow Built-in Rules
+# ==============================================================================
+
+# IDE / Editor Folders (Windows Specific but globally safe)
+.vs/
+.vscode/
+
+# Build Directories (Cross-Platform compatibility)
+build/
+out/
+
+# CMake / CPack Generated Files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+CPackConfig.cmake
+CPackSourceConfig.cmake
+CMakeUserPresets.json
+CMakeSettings.json
+
+# FetchContent Dependencies (From CMakeLists.txt)
+_deps/
+certs/
+
+# Compiled Executables & Libraries (From CMake targets)
+*.exe
+*.dll
+*.pdb
+*.lib
+*.a
+*.so
+*.o
+*.obj
+*.stamp
+
+# Specific Runtime Outputs (Based on POST_BUILD / custom target actions)
+# settings.json
+
+# ==============================================================================
+# Target / Environment Specific Testing Overrides
+# ==============================================================================
+
+tests/node_modules/
+
+# Specific test data file (Preserving global .dat tracking ability)
+tests/toy.dat

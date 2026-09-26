@@ -1,0 +1,11 @@
+# Handle all text files by auto-detecting text vs binary
+* text=auto
+
+# Force LF line endings for source code files
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css text eol=lf

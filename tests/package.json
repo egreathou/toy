@@ -1,0 +1,10 @@
+{
+  "name": "toy-frontend-tests",
+  "private": true,
+  "scripts": {
+    "test": "node dom-smoke-test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}

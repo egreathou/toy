@@ -1,0 +1,6 @@
+if(NOT EXISTS "${DEST}")
+    file(COPY "${SRC}" DESTINATION "${DEST_DIR}")
+    message(STATUS "Seeded ${DEST} (did not previously exist)")
+else()
+    message(STATUS "${DEST} already exists — leaving it untouched")
+endif()

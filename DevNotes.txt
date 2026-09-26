@@ -1,0 +1,2018 @@
+Complete Status:
+----------------
+
+User status flags          Meaning
+────────────────────────   ──────────────────────────────────────────
+ACTIVE          (0x00)     Can register for new games
+AT_GAME_LIMIT   (0x02)     Cannot start new games, existing games continue
+USER_DELETED    (0x04)     Marked by user, data retained, name reserved
+INACTIVE        (0x01)     General inactive state, set with other flags
+ARCHIVED        (0x08)     Moved to archive in a future maintenance event
+SUSPENDED       (0x10)     Administrative hold
+
+Game status flags           Meaning
+─────────────────────────   ──────────────────────────────────────────
+ACTIVE          (0x00)     Accepting events from both players
+INACTIVE        (0x01)     No longer accepting events
+ARCHIVED        (0x08)     Moved to archive in a future maintenance event
+
+Notification Paths: (proposed)
+-------------------
+
+Player A submits event
+         │
+         ▼
+    Hour window opens
+         │
+    ┌────┴────────────────────────┐
+    │                             │
+Player B submits               Hour expires
+event within window            without event
+    │                             │
+    ▼                             ▼
+Match detected               No match
+Both players notified        Player B notified:
+immediately:                 "Player A was thinking
+"You matched"                of you"
+Score delivered              No score — emotional
+to both                      value only
+
+Where the project stands at this point
+✔  Core data structures and memory layout
+✔  All six indexes with correct types and lifetime management
+✔  AddUser, AddGame, AddEvent with validation and error handling
+✔  Match detection and scoring
+✔  Device token authentication
+✔  Crow integration with middleware and all planned routes
+✔  Unit tests passing for all core functions
+✔  API verified working end to end with curl
+
+The remaining work ahead:
+
+○  PWA frontend — HTML, CSS, JavaScript
+○  Notification worker thread
+○  Memory mapped file persistence
+○  Linux migration
+○  Nginx configuration
+○  TLS via Let's Encrypt
+○  AWS deployment
+
+PWA:
+======================================
+
+The most elegant option for your specific architecture is to have Crow serve the static PWA files directly alongside the API, eliminating a second server entirely:
+
+// Serve static PWA files from Crow directly
+CROW_ROUTE(app, "/")
+([]() {
+    return crow::response(crow::mustache::load("index.html").render());
+});
+
+// Serve static assets
+CROW_ROUTE(app, "/static/<path>")
+([](const crow::request& req, std::string path) {
+    crow::response res;
+    res.set_static_file_info("static/" + path);
+    return res;
+});
+
+// All API routes under /api/
+CROW_ROUTE(app, "/api/users").methods(crow::HTTPMethod::POST)
+// ... etc
+
+This single-binary deployment — one Crow process serving both the PWA and the API — is operationally simple and perfectly adequate for a low traffic game application. 
+No Apache, no Nginx, no reverse proxy configuration to maintain.
+
+The parallel between backend and frontend design philosophy
+
+The backend succeeded by choosing the simplest data structure that correctly solved each problem, avoiding unnecessary abstraction, and keeping each component's responsibility clear and narrow. The same approach on the frontend means:
+
+- Semantic HTML that describes content accurately without unnecessary wrapper elements
+- CSS that handles layout and responsiveness without a framework
+- Minimal JavaScript that does exactly what is needed and nothing more
+
+This combination produces a PWA that is fast by construction rather than fast after optimization.
+
+Start a web server from any directory:
+--------------------------------------
+cd <path to your website>
+python3 -m http.server
+-or-
+python3 -m http.server 8080
+
+Css Custom Properties:
+----------------------
+
+:root {
+    --color-primary:    #4a90d9;
+    --color-background: #f8f8f8;
+    --color-text:       #2c2c2c;
+    --color-accent:     #e8734a;
+    --spacing-unit:     8px;
+    --border-radius:    6px;
+    --font-primary:     'Inter', system-ui, sans-serif;
+}
+
+The PWA file structure — keeping it flat and simple
+---------------------------------------------------
+
+/var/www/toy/
+├── index.html          — single page, all views managed by JS state
+├── style.css           — all styles, organized by component
+├── app.js              — application logic, API calls, view management
+├── service-worker.js   — caching, offline support, push notifications
+└── manifest.json       — PWA identity, icons, display mode
+
+This flat structure with four files mirrors the single binary philosophy of the backend. 
+No build tools, no bundler, no transpiler required. The browser receives exactly what is in these files.
+
+The Manifest - PWA identity:
+----------------------------
+
+{
+    "name": "Thinking of You",
+    "short_name": "ToY",
+    "description": "A game about human connection",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#f8f8f8",
+    "theme_color": "#4a90d9",
+    "icons": [
+        { "src": "/icons/toy-192.png", "sizes": "192x192", "type": "image/png" },
+        { "src": "/icons/toy-512.png", "sizes": "512x512", "type": "image/png" }
+    ]
+}
+
+display: standalone makes the PWA feel like a native app when installed — no browser chrome, full screen, its own icon on the home screen. 
+This matters for ToY because the gesture of opening the app to send an event should feel natural and immediate, not like opening a website.
+
+The HTML structure — semantic and minimal
+-----------------------------------------
+A single index.html with clearly defined view sections that JavaScript shows and hides based on application state:
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#4a90d9">
+    <link rel="manifest" href="/manifest.json">
+    <link rel="stylesheet" href="/style.css">
+    <title>Thinking of You</title>
+</head>
+<body>
+    <!-- Registration view -->
+    <main id="view-register" class="view">
+        <h1>Thinking of You</h1>
+        <p class="tagline">A quiet test of human connection</p>
+        <input type="text" id="input-name"
+               placeholder="Your name" maxlength="27" autocomplete="off">
+        <button id="btn-register">Begin</button>
+    </main>
+
+    <!-- Game list view -->
+    <main id="view-games" class="view hidden">
+        <header>
+            <h2 id="label-username"></h2>
+            <button id="btn-new-game">New Game</button>
+        </header>
+        <ul id="list-games" role="list"></ul>
+    </main>
+
+    <!-- Active game view -->
+    <main id="view-game" class="view hidden">
+        <header>
+            <button id="btn-back" aria-label="Back">←</button>
+            <h2 id="label-opponent"></h2>
+        </header>
+        <section id="panel-event">
+            <button id="btn-send-event" class="btn-primary">
+                Thinking of You
+            </button>
+            <p id="label-last-sent"></p>
+        </section>
+        <section id="panel-events">
+            <ul id="list-events" role="list"></ul>
+        </section>
+    </main>
+
+    <script src="/app.js"></script>
+</body>
+</html>
+
+Three views, one file. No template engine, no virtual DOM, no component framework. Each view is a <main> element that is shown or hidden by toggling a CSS class.
+
+The CSS approach — layout and clarity
+-------------------------------------
+
+/* ── Reset and base ───────────────────────────────────────── */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin:     0;
+    padding:    0;
+}
+
+body {
+    font-family:      var(--font-primary);
+    background-color: var(--color-background);
+    color:            var(--color-text);
+    min-height:       100dvh;  /* dvh handles mobile browser chrome correctly */
+}
+
+/* ── View management ──────────────────────────────────────── */
+
+.view    { display: flex; flex-direction: column;
+           min-height: 100dvh; padding: calc(var(--spacing-unit) * 3); }
+.hidden  { display: none; }
+
+/* ── The core interaction — the event button ──────────────── */
+
+.btn-primary {
+    width:         100%;
+    padding:       calc(var(--spacing-unit) * 4);
+    font-size:     1.25rem;
+    background:    var(--color-primary);
+    color:         white;
+    border:        none;
+    border-radius: var(--border-radius);
+    cursor:        pointer;
+    transition:    transform 0.1s ease, opacity 0.1s ease;
+}
+
+.btn-primary:active {
+    transform: scale(0.97);
+    opacity:   0.9;
+}
+
+/* ── Event list items ─────────────────────────────────────── */
+
+.event-item {
+    display:       flex;
+    align-items:   center;
+    gap:           calc(var(--spacing-unit) * 2);
+    padding:       calc(var(--spacing-unit) * 2);
+    border-bottom: 1px solid #e0e0e0;
+}
+
+.event-item.matched { border-left: 3px solid var(--color-accent); }
+.event-score        { font-size: 1.5rem; font-weight: bold;
+                      color: var(--color-accent); }
+.event-time         { font-size: 0.85rem; color: #888; margin-left: auto; }
+
+/* ── Responsive — wider screens ───────────────────────────── */
+
+@media (min-width: 640px) {
+    .view       { max-width: 480px; margin: 0 auto; }
+    .btn-primary { padding: calc(var(--spacing-unit) * 3); }
+}
+
+The JavaScript approach — state and API calls only
+--------------------------------------------------
+
+// ── Application state ─────────────────────────────────────────────────────
+
+const state = {
+    userId:   null,
+    userName: null,
+    gameId:   null,
+    pollTimer: null
+};
+
+// ── API layer ─────────────────────────────────────────────────────────────
+
+const API = {
+    base: '/api',
+
+    async post(path, body) {
+        const res = await fetch(`${API.base}${path}`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(body)
+        });
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
+    },
+
+    async get(path) {
+        const res = await fetch(`${API.base}${path}`);
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
+    },
+
+    register:   (name)            => API.post('/users', { name }),
+    newGame:    (p1, p2)          => API.post('/games', { player1Id: p1, player2Id: p2 }),
+    sendEvent:  (gameId, userId)  => API.post(`/games/${gameId}/events`, { playerId: userId }),
+    getGames:   (userId)          => API.get(`/players/${userId}/games`),
+    getEvents:  (gameId)          => API.get(`/games/${gameId}/events`),
+    getNotifications: (userId)    => API.get(`/users/${userId}/notifications`)
+};
+
+// ── View management ───────────────────────────────────────────────────────
+
+const views = {
+    register: document.getElementById('view-register'),
+    games:    document.getElementById('view-games'),
+    game:     document.getElementById('view-game')
+};
+
+function showView(name) {
+    Object.values(views).forEach(v => v.classList.add('hidden'));
+    views[name].classList.remove('hidden');
+}
+
+// ── Event handlers ────────────────────────────────────────────────────────
+
+document.getElementById('btn-register').addEventListener('click', async () => {
+    const name = document.getElementById('input-name').value.trim();
+    if (!name) return;
+    try {
+        const user = await API.register(name);
+        state.userId   = user.id;
+        state.userName = name;
+        document.getElementById('label-username').textContent = name;
+        showView('games');
+        loadGames();
+        startPolling();
+    } catch (err) {
+        alert(err.message);
+    }
+});
+
+document.getElementById('btn-send-event').addEventListener('click', async () => {
+    try {
+        const event = await API.sendEvent(state.gameId, state.userId);
+        document.getElementById('label-last-sent').textContent =
+            'Sent ' + new Date().toLocaleTimeString();
+        loadEvents(state.gameId);
+    } catch (err) {
+        alert(err.message);
+    }
+});
+
+// ── Polling for notifications ─────────────────────────────────────────────
+
+function startPolling() {
+    state.pollTimer = setInterval(async () => {
+        try {
+            const notifications = await API.getNotifications(state.userId);
+            notifications.forEach(n => showNotification(n));
+        } catch (_) {}
+    }, 30000);  // every 30 seconds
+}
+
+function showNotification(notification) {
+    // Browser notification API if permission granted
+    if (Notification.permission === 'granted') {
+        new Notification('Thinking of You', {
+            body: notification.message,
+            icon: '/icons/toy-192.png'
+        });
+    }
+}
+
+Why this stays true to the project spirit
+
+The frontend has the same properties as the backend — every piece is there for a clear reason, nothing is included by habit or convention, and the whole thing is understandable by reading it top to bottom. 
+There are no hidden abstractions, no build pipeline to maintain, and no framework version to keep current.
+
+The performance characteristics follow naturally. 
+No framework JavaScript to parse and execute, no virtual DOM reconciliation, no CSS-in-JS runtime. The browser receives HTML, CSS, and JavaScript and renders the application directly. 
+On a mobile connection this difference is felt immediately.
+
+The one area where a framework genuinely helps — managing complex component state across many views — does not apply to ToY. 
+Three views, a small number of interactions, and a clear data flow from API to DOM do not require React or Vue. 
+The vanilla approach is not a compromise here, it is the right tool for the scale of the problem.
+
+The case for JSON
+-----------------
+
+JSON is the natural fit for this application for several reasons that align directly with the design goals established throughout this conversation.
+
+PWA compatibility — the frontend is a PWA running in a browser. 
+The browser's fetch API speaks JSON natively. 
+A binary protocol would require custom serialization and deserialization code in JavaScript on the client side, adding complexity to the frontend that vanilla JS was specifically chosen to avoid.
+
+Human readability — during development and testing, being able to read API responses directly in the browser or in curl output is valuable. 
+The Crow routes already written in this conversation all produce JSON. A binary protocol makes debugging significantly harder.
+
+Traffic volume is bounded — the rate limiting established earlier means the event rate is inherently low. 
+One event per player per game per hour across your projected user base produces a modest request volume that JSON handles comfortably. 
+The overhead of JSON serialization will never be a measurable bottleneck at this scale.
+
+Crow support — nlohmann/json is already part of the planned stack. JSON responses from Crow are straightforward and well understood.
+
+A middle path worth considering
+-------------------------------
+
+Rather than choosing between pure JSON and a binary protocol, the more relevant scalability question for ToY is payload efficiency within JSON. 
+A few simple conventions keep the JSON responses lean without introducing binary complexity:
+
+// Verbose — wastes bandwidth on field names repeated in every response
+{
+    "eventIdentifier": 42,
+    "gameIdentifier": 7,
+    "playerIdentifier": 3,
+    "eventTimestamp": 1000000,
+    "matchedEventIdentifier": 41,
+    "eventStatus": 1
+}
+
+// Lean — short field names, same information
+{
+    "id": 42,
+    "gid": 7,
+    "uid": 3,
+    "ts": 1000000,
+    "mid": 41,
+    "st": 1
+}
+
+For a PWA the JavaScript client knows what the fields mean from the API contract. 
+Short field names reduce payload size without any binary parsing complexity on either end.
+
+Recommendation
+--------------
+
+JSON throughout, with lean field names in the response bodies. 
+It is consistent with the single binary, low complexity philosophy that has guided every other decision in this project, it requires no additional client-side infrastructure, and it leaves the binary option available as a targeted optimization for specific high-volume endpoints if that need ever arises. 
+The scalability of this application will be determined by the backend data structures and the hosting infrastructure long before JSON serialization becomes a concern.
+
+Completely Remove VS Code:
+--------------------------
+WIN+R
+%appdata%
+delete "Code"
+WIN+RA
+%userprofile%
+delete ".vscode"
+
+API Surface:
+------------
+
+POST   /api/users                    → AddUser
+GET    /api/users/{name}             → look up player by name via user_index
+GET    /api/players/{id}/games       → GetGamesForPlayer via game_index
+POST   /api/games                    → AddGame
+GET    /api/games/{id}/events        → GetEventsForGame via event_index
+POST   /api/games/{id}/events        → AddEvent (with rate limit enforcement)
+
+
+=======================================
+=======================================
+
+// code to convert timespans
+
+#include <cstdint>
+#include <cassert>
+#include <stdexcept>
+
+// Your original 64-bit timespan in seconds
+int64_t large_timespan_seconds = 3599;
+
+// 1. Safety Check: Verify the value actually fits in a 16-bit signed integer
+if (large_timespan_seconds < -32768 || large_timespan_seconds > 32767) {
+    throw std::out_of_range("Timespan exceeds 16-bit storage capacity.");
+}
+
+// 2. Safe Conversion
+int16_t narrow_timespan = static_cast<int16_t>(large_timespan_seconds);
+
+// 3. Binary Persistence (Example writing to a file stream)
+// outFile.write(reinterpret_cast<const char*>(&narrow_timespan), sizeof(narrow_timespan));
+
+
+Cross Platform Memory Mapped Files
+----------------------------------
+
+#include <iostream>
+#include <string>
+#include <string_view>
+
+#ifdef _WIN32
+    #include <windows.h>
+#else
+    #include <fcntl.h>
+    #include <sys/mman.h>
+    #include <sys/stat.h>
+    #include <unistd.h>
+#endif
+
+class CrossPlatformMmap {
+public:
+    CrossPlatformMmap(const std::string& filepath, size_t size) : size_(size) {
+#ifdef _WIN32
+        // 1. Open or create the file on Windows
+        file_handle_ = CreateFileA(filepath.c_str(), GENERIC_READ | GENERIC_WRITE, 
+                                   0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (file_handle_ == INVALID_HANDLE_VALUE) return;
+
+        // 2. Create the file mapping object
+        mapping_handle_ = CreateFileMappingA(file_handle_, NULL, PAGE_READWRITE, 
+                                             0, static_cast<DWORD>(size_), NULL);
+        if (!mapping_handle_) {
+            CloseHandle(file_handle_);
+            return;
+        }
+
+        // 3. Map the view into the process virtual address space
+        data_ = static_cast<char*>(MapViewOfFile(mapping_handle_, FILE_MAP_ALL_ACCESS, 0, 0, size_));
+#else
+        // 1. Open or create the file on Linux
+        fd_ = open(filepath.c_str(), O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
+        if (fd_ == -1) return;
+
+        // 2. Memory mapping requires the file on disk to physically match the requested size
+        if (ftruncate(fd_, size_) == -1) {
+            close(fd_);
+            return;
+        }
+
+        // 3. Map the file using POSIX mmap
+        data_ = static_cast<char*>(mmap(NULL, size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0));
+        if (data_ == MAP_FAILED) {
+            data_ = nullptr;
+            close(fd_);
+        }
+#endif
+    }
+
+    ~CrossPlatformMmap() {
+        if (!data_) return;
+#ifdef _WIN32
+        UnmapViewOfFile(data_);
+        CloseHandle(mapping_handle_);
+        CloseHandle(file_handle_);
+#else
+        munmap(data_, size_);
+        close(fd_);
+#endif
+    }
+
+    // Get pointer to the memory region
+    char* data() const { return data_; }
+    bool is_valid() const { return data_ != nullptr; }
+
+private:
+    size_t size_ = 0;
+    char* data_ = nullptr;
+
+#ifdef _WIN32
+    HANDLE file_handle_ = INVALID_HANDLE_VALUE;
+    HANDLE mapping_handle_ = NULL;
+#else
+    int fd_ = -1;
+#endif
+};
+
+int main() {
+    std::string filename = "shared_buffer.dat";
+    size_t mapping_size = 4096; // 4 KB
+
+    CrossPlatformMmap mmap_file(filename, mapping_size);
+
+    if (!mmap_file.is_valid()) {
+        std::cerr << "Failed to map file!" << std::endl;
+        return 1;
+    }
+
+    // Write cross-compatible data via pointer
+    char* ptr = mmap_file.data();
+    std::string_view message = "Hello from cross-platform memory mapping!";
+    std::copy(message.begin(), message.end(), ptr);
+
+    std::cout << "Successfully wrote to mapped memory: " << ptr << std::endl;
+    return 0;
+}
+
+Crucial Platform Differences to Keep in Mind
+
+If you are writing the implementation wrapper yourself, ensure you account for these architectural nuances:
+
+- File Sizing: 
+  On Linux (mmap), you must call ftruncate or physically expand the file to your desired size before calling mmap. 
+  Windows handles the file sizing directly within CreateFileMapping via its sizing arguments.
+  
+- Error Handling: 
+  Linux emits severe signals (SIGBUS/SIGSEGV) if you attempt to access memory beyond the physical end of the file. 
+  Windows throws normal structured exceptions or API errors
+  
+- Alignment: 
+  Memory mapping requires your mapping offsets to align cleanly with the operating system's internal virtual memory page boundaries (usually 4KB or 64KB chunks). 
+
+
+-------------------------------------
+2nd Method
+
+#include <iostream>
+#include <string>
+#include <stdexcept>
+
+// Platform detection and header inclusion
+#if defined(_WIN32) || defined(_WIN64)
+    #define PLATFORM_WINDOWS
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+#elif defined(__linux__) || defined(__unix__)
+    #define PLATFORM_LINUX
+    #include <fcntl.h>
+    #include <sys/mman.h>
+    #include <sys/stat.h>
+    #include <unistd.h>
+#else
+    #error "Unsupported Operating System"
+#endif
+
+class MemoryMappedFile {
+private:
+    void* m_data = nullptr;
+    size_t m_size = 0;
+
+#if defined(PLATFORM_WINDOWS)
+    HANDLE m_fileHandle = INVALID_HANDLE_VALUE;
+    HANDLE m_mappingHandle = NULL;
+#elif defined(PLATFORM_LINUX)
+    int m_fileDescriptor = -1;
+#endif
+
+public:
+    MemoryMappedFile(const std::string& filepath, size_t size) : m_size(size) {
+        if (size == 0) throw std::invalid_argument("Size must be greater than 0");
+
+#if defined(PLATFORM_WINDOWS)
+        // 1. Open or create the file
+        m_fileHandle = CreateFileA(filepath.c_str(), GENERIC_READ | GENERIC_WRITE, 
+                                   FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, 
+                                   OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (m_fileHandle == INVALID_HANDLE_VALUE) {
+            throw std::runtime_error("Windows: Failed to open/create file.");
+        }
+
+        // 2. Create the file mapping object
+        m_mappingHandle = CreateFileMappingA(m_fileHandle, NULL, PAGE_READWRITE, 
+                                             0, static_cast<DWORD>(m_size), NULL);
+        if (m_mappingHandle == NULL) {
+            CloseHandle(m_fileHandle);
+            throw std::runtime_error("Windows: Failed to create file mapping object.");
+        }
+
+        // 3. Map the view of the file into memory
+        m_data = MapViewOfFile(m_mappingHandle, FILE_MAP_ALL_ACCESS, 0, 0, m_size);
+        if (!m_data) {
+            CloseHandle(m_mappingHandle);
+            CloseHandle(m_fileHandle);
+            throw std::runtime_error("Windows: Failed to map view of file.");
+        }
+
+#elif defined(PLATFORM_LINUX)
+        // 1. Open or create the file with read/write permissions
+        m_fileDescriptor = open(filepath.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        if (m_fileDescriptor == -1) {
+            throw std::runtime_error("Linux: Failed to open/create file.");
+        }
+
+        // 2. Truncate/extend the file to the target size 
+        if (ftruncate(m_fileDescriptor, m_size) == -1) {
+            close(m_fileDescriptor);
+            throw std::runtime_error("Linux: Failed to resize file.");
+        }
+
+        // 3. Map the file into memory
+        m_data = mmap(NULL, m_size, PROT_READ | PROT_WRITE, MAP_SHARED, m_fileDescriptor, 0);
+        if (m_data == MAP_FAILED) {
+            close(m_fileDescriptor);
+            m_data = nullptr;
+            throw std::runtime_error("Linux: Failed to map memory.");
+        }
+#endif
+    }
+
+    ~MemoryMappedFile() {
+        if (!m_data) return;
+
+#if defined(PLATFORM_WINDOWS)
+        UnmapViewOfFile(m_data);
+        CloseHandle(m_mappingHandle);
+        CloseHandle(m_fileHandle);
+#elif defined(PLATFORM_LINUX)
+        munmap(m_data, m_size);
+        close(m_fileDescriptor);
+#endif
+    }
+
+    // Disable copy constructors to ensure clean RAII memory management
+    MemoryMappedFile(const MemoryMappedFile&) = delete;
+    MemoryMappedFile& operator=(const MemoryMappedFile&) = delete;
+
+    // Direct pointer to the memory space
+    void* data() const { return m_data; }
+    size_t size() const { return m_size; }
+};
+
+int main() {
+    try {
+        // Creates or maps a 4KB file across either platform
+        MemoryMappedFile mfile("shared_buffer.dat", 4096);
+        
+        // Write data directly to memory
+        char* textBuffer = static_cast<char*>(mfile.data());
+        std::snprintf(textBuffer, mfile.size(), "Hello Cross-Platform Memory Mapping!");
+        
+        std::cout << "Data successfully written to memory mapped file: " << textBuffer << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+    }
+    return 0;
+}
+
+
+Serving PWA files directly from Crow:
+-------------------------------------
+
+Based on your code fragment, your static file URLs must be formatted as exact top-level paths relative to the root domain.
+
+Because your middleware uses explicit string equality checks (req.url == "/filename"), any deviation in the URL structure—such as nested directories, query parameters, or missing trailing slashes—will fail the conditions and trigger your authentication block.
+
+    void before_handle(crow::request& req, crow::response& res, context& ctx) {
+        // 1. Handle exact endpoints
+        if (req.url == "/api/health") return;
+        if (req.url == "/api/users" && req.method == crow::HTTPMethod::POST) return;
+        if (req.url == "/") return;
+
+        // 2. Safely check prefixes to allow query parameters (e.g., /app.js?v=2)
+        // rfind returns 0 if the string starts with the given substring
+        if (req.url.rfind("/style.css", 0) == 0 ||
+            req.url.rfind("/app.js", 0) == 0 ||
+            req.url.rfind("/manifest.json", 0) == 0 ||
+            req.url.rfind("/service-worker.js", 0) == 0) {
+            return;
+        }
+
+        // 3. Allow an entire dedicated assets folder for icons, fonts, and images
+        if (req.url.rfind("/static/", 0) == 0 || req.url.rfind("/assets/", 0) == 0) {
+            return;
+        }
+    
+        // ... rest of authentication validation logic ...
+    }
+
+
+Additional values for settings.json:
+------------------------------------
+
+{
+    "port": 8080,
+    "threads": 2,
+    "dataFile": "toy.dat",
+    "logLevel": "info",
+    "matchWindowSeconds": 3600,
+    "maxGamesPerPlayer": 10
+}
+
+Moving "dataFile" into settings is particularly useful for the Linux deployment — the production server might store the data file in /var/lib/toy/toy.dat while development uses the local directory. 
+Configuring that path externally means the same binary works in both environments without rebuilding.
+
+Moving matchWindowSeconds and maxGamesPerPlayer into settings rather than compile-time constants would allow tuning the game parameters without a rebuild — useful during early deployment when you are observing how players actually engage with the game and may want to adjust the rules.
+
+
+URLs for each endpoint:
+-----------------------
+
+Health check:     http://localhost:8080/api/health
+Register user:    http://localhost:8080/api/users           (POST)
+Search user:      http://localhost:8080/api/users/search?name=Eric
+Create game:      http://localhost:8080/api/games           (POST)
+Get games:        http://localhost:8080/api/games           (GET)
+Submit event:     http://localhost:8080/api/games/0/events  (POST)
+Get events:       http://localhost:8080/api/games/0/events  (GET)
+Game view:        http://localhost:8080/api/games/0/view
+Notifications:    http://localhost:8080/api/notifications
+Static PWA files: http://localhost:8080/
+
+To reset UI:
+------------
+
+1. Open browser developer tools (F12)
+   Open Console
+   localStorage.removeItem('toy.session')
+
+2. Open browser developer tools (F12)
+   Application > Storage > Local Storage
+   Find toy.session and delete it (or right-click > Clear)
+   Refresh page
+
+Q: Could we write a simple C++ console tool that can dump the state of toy.dat to console text? Maybe that is a big ask.
+A: New seed-players.js:
+    - Delete toy.dat, start toy-server.exe.
+    - node tests/seed-players.js (no npm install needed — it only uses built-in fetch, no dependencies at all).
+    - It prints five ready-to-paste snippets, one per seeded player — Alice/Bob (one pending invitation, both sides), Carol/Dave (an active game), Eve (nothing, for the empty state).
+    - Open the app in your browser, DevTools console, paste whichever player's snippet, hit enter — it sets the session and reloads for you. Switching identities is just pasting a different one.
+    - To reset: stop the server, delete toy.dat, restart, reseed.
+   Copy the whole build-output folder (toy-server.exe, settings.json, www/) to a separate location, run it from there, and it gets a completely independent toy.dat automatically
+
+Usage of the seed-players.js script:
+
+    C:\proj\cpp\toy-cpp\tests>node seed-players.js
+    Registering players...
+
+    Done. Seeded state:
+      Alice  -> Bob    (pending — Alice: sent, Bob: waiting to accept)
+      Carol <-> Dave   (active game, both sides)
+      Eve              (no games — empty-state view)
+
+    Paste one of these into your browser's console to become that player
+    on this device, then reload (the snippet does that for you):
+
+    --- Alice (id 0) ---
+    localStorage.setItem('toy.session', JSON.stringify({"id":0,"name":"Alice","token":"1ddeb6273b582552"})); location.reload();
+
+    --- Bob (id 1) ---
+    localStorage.setItem('toy.session', JSON.stringify({"id":1,"name":"Bob","token":"3fc7372a7d4d9f36"})); location.reload();
+
+    --- Carol (id 2) ---
+    localStorage.setItem('toy.session', JSON.stringify({"id":2,"name":"Carol","token":"aa48897d1e187200"})); location.reload();
+
+    --- Dave (id 3) ---
+    localStorage.setItem('toy.session', JSON.stringify({"id":3,"name":"Dave","token":"fd7486686b08d337"})); location.reload();
+
+    --- Eve (id 4) ---
+    localStorage.setItem('toy.session', JSON.stringify({"id":4,"name":"Eve","token":"98fcd959175cce4a"})); location.reload();
+
+
+To setup Linux build machine (Ubuntu):
+
+reduce screen resolution:
+- if dpkg-reconfigure is not installed:
+    sudo apt update
+	sudo apt install console-setup bash-completion
+  sudo dpkg-reconfigure console-setup
+    Select UTF-8
+	Select Guess optimal character set
+	Choose a font style (e.g., Terminus or Fixed are highly legible)
+	Choose a larger font size (e.g., 16x32 or 14x28)
+- happens immediately, optionally reboot to be sure
+    sudo reboot	
+  
+  sudo apt update && sudo apt install -y build-essential
+
+  sudo apt install -y libasio-dev libssl-dev zlib1g-dev
+
+- or more complete - 
+
+sudo apt install -y \
+  build-essential \
+  gcc \
+  g++ \
+  cmake \
+  ninja-build \
+  git \
+  clang \
+  clang-format \
+  clang-tidy \
+  gdb \
+  valgrind \
+  pkg-config \
+  openssl \
+  libssl-dev \
+  zlib1g-dev \
+  libasio-dev
+  
+build-essential	Base toolchain — gcc, g++, make, libc headers
+gcc / g++	GNU C and C++ compilers
+cmake	Build system — required for CROW
+ninja-build	Fast build backend used with cmake
+git	Source control — clone CROW and your repos
+clang	LLVM compiler — alternative to gcc
+clang-format	Code formatter
+clang-tidy	Static analysis
+gdb	GNU debugger
+valgrind	Memory leak and error detection
+pkg-config	Library compile flag helper
+openssl / libssl-dev	TLS support — needed for CROW HTTPS later
+zlib1g-dev	Compression — CROW dependency
+libasio-dev	Async I/O — core CROW dependency
+
+Reduced set of packages for this project:
+sudo apt install -y \
+  build-essential \
+  g++ \
+  cmake \
+  git \
+  gdb \
+  valgrind \
+  ninja-build \
+  pkg-config \
+  openssl \
+  libssl-dev \
+  libasio-dev
+
+sudo apt update returns "...InRelease is not valid yet..."
+  system's local clock is set to the past relative to the release timestamp of the package repository
+
+smoke test:
+-----------
+
+mkdir ~/cpp-test && cd ~/cpp-test
+
+nano main.cpp
+
+#include <iostream>
+int main() {
+    std::cout << "C++ toolchain working on Ubuntu 26.04\n";
+    return 0;
+}
+<save>
+
+# Build with g++ directly
+g++ -std=c++23 -o test_direct main.cpp
+./test_direct
+
+# Build with cmake + ninja
+nano CMakeLists.txt
+
+cmake_minimum_required(VERSION 3.20)
+project(CppTest)
+set(CMAKE_CXX_STANDARD 23)
+add_executable(test_cmake main.cpp)
+<save>
+
+cmake -B build -G Ninja
+-or to prevent warnings and specify type-
+cmake -S . -B build -G Ninja --log-level=TRACE --trace-expand -Wno-dev -DCMAKE_BUILD_TYPE=Release
+
+cmake --build build
+./build/test_cmake
+
+IMPORTANT: OpenSSL must be installed locally from Shining Light: https://slproweb.com/products.html
+
+To force a rebuild: to test that settings.json is not replaced in the output folder
+-------------------
+touch build/settings_seeded.stamp
+cmake --build build
+-or-
+(Get-Item build/settings_seeded.stamp).LastWriteTime = Get-Date
+cmake --build build
+-or-
+cmake --build build --target seed_settings
+
+
+SSH Configuration:
+==================
+
+# Check if openssh-server is installed
+dpkg -l | grep openssh-server
+
+# Check if the service is running
+sudo systemctl status ssh
+
+# install if not present
+sudo apt install -y openssh-server
+
+# Start and enable it to survive reboots
+sudo systemctl enable ssh
+sudo systemctl start ssh
+
+# Confirm it is running
+sudo systemctl status ssh
+
+# Check firewall status
+sudo ufw status
+
+# If active, allow SSH
+sudo ufw allow ssh
+
+# Confirm the rule was added
+sudo ufw status
+
+# Show the assigned IP address
+ip addr show enp0s25 | grep "inet "
+-or-
+ip addr show eno1 | grep "inet "
+
+output:
+  inet 192.168.1.x/24 brd 192.168.1.255 scope global enp0s25
+  
+netplan config:
+---------------
+
+Take dynamically assigned IP address
+ Ex.: 15.3.21.99
+ 
+Alter it and ping
+ Ex.: 15.3.21.220
+ 
+ping 15.3.21.220
+  Request should time out.
+  If not, pick another random address near the top of the range
+  
+ip route show:
+
+	default via 15.3.21.1 dev eno1 proto dhcp src 15.3.21.99 metric 100
+	15.3.21.0/24 dev eno1 proto kernel scope link src 15.3.21.99 metric 100
+	15.3.21.1 dev eno1 proto dhcp scope link src 15.3.21.99 metric 100
+	15.64.64.53 via 15.3.21.1 dev eno1 proto dhcp src 15.3.21.99 metric 100
+	15.64.64.54 via 15.3.21.1 dev eno1 proto dhcp src 15.3.21.99 metric 100
+
+resolvectl status | grep "DNS Servers" output:
+
+	DNS Servers: 15.64.64.53 15.64.64.54
+
+Network Profile Summary
+
+- Interface: eno1
+- Gateway: 15.3.21.1
+- Subnet Mask: /24 (equivalent to 255.255.255.0)
+- Nameservers: 15.64.64.53 and 15.64.64.54
+
+! Chosen IP address: 15.3.21.220
+
+yaml:
+
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    eno1:
+      dhcp4: no
+      addresses:
+        - 15.3.21.220/24  # <-- Change .220 to your chosen vacant IP address
+      routes:
+        - to: default
+          via: 15.3.21.1
+      nameservers:
+        addresses:
+          - 15.64.64.53
+          - 15.64.64.54
+
+sudo netplan try
+	[warns about insecure yaml]
+	
+# 1. Change ownership of the file to root
+sudo chown root:root /etc/netplan/01-netcfg.yaml
+
+# 2. Restrict permissions so only root can read/write (rw-------)
+sudo chmod 600 /etc/netplan/01-netcfg.yaml
+
+sudo netplan try
+	[if no warnings or errors, hit ENTER to accept]
+
+Test the Gateway: 
+  ping -c 3 15.3.21.1
+	
+verify:
+  ip addr show eno1
+  ip addr show enx3c18a07e3782
+  
+list ethernet adapters:
+-----------------------
+1. ip link show -or- ip a
+2. lshw -C network (detailed)
+3. lspci | grep -i ethernet (pci)
+4. ifconfig -a (legacy)
+  
+
+expected:
+2: eno1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000
+    link/ether 00:11:22:33:44:55 brd ff:ff:ff:ff:ff:ff
+    inet 15.3.21.220/24 brd 15.3.21.255 scope global eno1
+       valid_lft forever preferred_lft forever
+
+keep unit from sleeping with lid closed: (detour)
+----------------------------------------
+sudo nano /etc/systemd/logind.conf
+
+	HandleLidSwitch=ignore
+	HandleLidSwitchExternalPower=ignore
+	HandleLidSwitchDocked=ignore
+	LidSwitchIgnoreInhibit=no
+<save>
+
+restart:
+  sudo systemctl restart systemd-logind
+
+
+SSH continued:
+--------------
+
+From Windows:
+  ssh engineer@15.3.21.220
+  <provide password>
+  
+expected: should connect with secure shell
+
+In VSCode:
+  CTRL+SHIFT+X
+  Search Remote-SSH (Microsoft) and install
+  CTRL+SHIFT+P
+  "Remote-SSH-Connect to Host"
+  Select Linux when prompted
+  Show Details immediately and provide password at prompt
+  VSCode will install server component...
+  
+VSCode About (HP):
+	Version: 1.132.1 (user setup)
+	Commit: c2d1b13fdc4a77628e5f3bb70173351c8f2fbad1
+	Date: 2026-08-07T10:44:35-07:00
+	Electron: 42.7.1
+	ElectronBuildId: 14760073
+	Chromium: 148.0.7778.280
+	Node.js: 24.18.0
+	V8: 14.8.178.38-electron.0
+	OS: Windows_NT x64 10.0.26200
+
+SSH Key Setup:
+--------------
+# 1. Generate key on server
+ssh-keygen -t ed25519 -C "3ls-dm800-g9-engineer"
+
+# 2. Display public key
+cat ~/.ssh/id_ed25519.pub
+
+# 3. Add to GitHub (done in browser)
+     Use key from step 2:
+
+# 4. Test authentication
+ssh -T git@github.com
+
+# 5. Create projects directory and clone both repos
+mkdir ~/projects && cd ~/projects
+git clone git@github.com:yourusername/your-repo.git
+git clone https://github.com/CrowCpp/Crow.git crow
+
+ssh-keygen -t ed25519 -C "3ls-dm800-g9-engineer"
+
+cat ~/.ssh/id_ed25519.pub (copy displayed key)
+
+Go to https://github.com/settings/keys
+Click New SSH key
+Title: Ubuntu-8540W-Dev
+Key type: Authentication Key
+Paste the public key from Step 2
+Click Add SSH key
+paste key
+
+Test: 
+  ssh -T git@github.com
+Output:
+	Hi yourusername! You've successfully authenticated, but GitHub
+	does not provide shell access.
+
+Ed25519 is a modern elliptic curve digital signature algorithm.
+	Ed — Edwards-curve Digital Signature Algorithm (EdDSA)
+	25519 — refers to the prime number 2²⁵⁵ - 19 that defines the specific elliptic curve used (Curve25519)
+Ed25519 gives you better security than RSA 2048 with a much smaller key and significantly faster signing operations.
+
+The SSH Key Algorithm Options Compared:
+	ssh-keygen -t ed25519    ← Best choice — modern, fast, secure
+	ssh-keygen -t ecdsa      ← Good — elliptic curve but older standard
+	ssh-keygen -t rsa -b4096 ← Acceptable — legacy, widely compatible
+	ssh-keygen -t dsa        ← Never use — deprecated, broken
+
+Ubuntu Server                          GitHub
+     │                                    │
+     │  1. Here is my public key          │
+     │ ──────────────────────────────────►│
+     │                                    │ 2. I know this key
+     │                                    │    Generate a challenge
+     │  3. Here is the challenge          │
+     │ ◄──────────────────────────────────│
+     │                                    │
+     │ 4. Sign challenge with             │
+     │    private key using Ed25519       │
+     │                                    │
+     │  5. Here is the signed response    │
+     │ ──────────────────────────────────►│
+     │                                    │ 6. Signature verified
+     │  7. Authentication successful      │    with public key
+     │ ◄──────────────────────────────────│
+
+# Clone your repo via SSH
+git clone git@github.com:egreathou/toy-cpp.git
+
+# Navigate into your repo
+cd ~/projects/toy-cpp
+
+# List contents
+ls -la
+
+# Check the directory structure
+find . -type f | sort
+
+Build the project:
+------------------
+configure:
+  cmake -B build -DCMAKE_BUILD_TYPE=Release
+compile:
+  cmake --build build
+run:
+  ./build/your_program_name
+
+Create shortcut to project directory:
+-------------------------------------
+edit: 
+  nano ~/.bashrc
+add:
+  alias toy="cd /home/eric/proj/toy-cpp"
+reload:
+  source ~/.bashrc
+
+
+
+
+
+Install Nodejs:
+===============
+
+sudo apt update
+sudo apt install nodejs
+sudo apt install npm
+
+On Windows:
+-----------
+winget install OpenJS.NodeJS.LTS
+
+
+Developers method: (try at home)
+------------------
+Run the NVM installation script::
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+Reload your terminal environment to register NVM:
+  source ~/.bashrc
+Install the latest Long-Term Support (LTS) version of Node.js:
+  nvm install --lts
+
+Install jsdom:
+--------------
+IMPORTANT! confirm directory to run these commands from
+
+How to install jsdom with npm:
+To install jsdom using npm, open your Ubuntu terminal, navigate to your project folder, and run the installation command.
+
+Step 1: Initialize Your Project (If you haven't already)
+If you do not have a package.json file in your project directory yet, create one first:
+  npm init -y
+Step 2: Install jsdom
+Run the standard installation command to add jsdom as a dependency to your project:
+  npm install jsdom
+Optional: Install as a Development Dependency
+If you only need jsdom for testing (such as running Jest or Mocha tests) and not for production code, install it as a development dependency instead:
+  npm install --save-dev jsdom
+Verify the Installation
+You can check that jsdom was successfully added to your project by looking inside your package.json file under the "dependencies" or "devDependencies" section, or by running:
+  npm list jsdom
+
+Running Node tests on Ubuntu server:
+------------------------------------
+
+To run both a C++ executable and a Node.js unit test sequentially or concurrently in a single SSH session, 
+you must manage the terminal processes so the C++ background task does not block your test execution.
+
+Method 1: Background Operator (&) and wait-on (Recommended)
+
+This is the cleanest approach for automated scripts or CI/CD pipelines. 
+It launches the C++ app in the background, waits for its port/process to become active, runs the tests, and cleans up.
+
+- Install the wait-on utility to ensure your tests do not start before the C++ app is fully ready:
+  npm install --save-dev wait-on
+- Run the C++ executable in the background using &, wait for it, run tests, and kill the process afterward:bash
+  ./my_cpp_executable & CPP_PID=$! && npx wait-on tcp:8088 && npm test; kill $CPP_PID
+
+Replace 8080 with the actual port your C++ application listens on.
+kill $CPP_PID ensures the C++ app terminates cleanly after the tests finish or fail.
+
+Method 2: Terminal Multiplexing with tmux (Best for Manual Debugging)
+
+If you need to watch the live logs of your C++ executable while simultaneously interacting with your Node.js unit tests, use tmux. 
+It splits your single SSH terminal window into multiple panels.
+
+- Start a new tmux session:
+  tmux new -s my-test-session
+- Run your C++ executable in the active window:
+  ./my_cpp_executable
+- Split the screen horizontally by pressing Ctrl + B, then release and press % (or " for a vertical split).
+- In the new pane, run your Node.js tests:
+  npm test
+- To exit and close everything when finished, type exit in each pane.
+
+Method 3: Handle Life Cycle Directly Inside Node.js (Most Robust) 
+
+Instead of handling this via shell scripting, you can program Node.js to spin up and tear down the C++ executable automatically during the test lifecycle using child_process.
+If you use a framework like Jest or Mocha, add this to your global setup and teardown configurations:
+
+Global Setup Script (setup.js):
+
+	const { spawn } = require('child_process');
+
+	module.exports = async () => {
+	  // Start the C++ executable
+	  global.__CPP_PROCESS__ = spawn('./my_cpp_executable', [], {
+		stdio: 'inherit' // Forwards C++ stdout/stderr to your terminal
+	  });
+	  
+	  // Give the C++ app 2 seconds to initialize before tests start
+	  await new Promise(resolve => setTimeout(resolve, 2000));
+	};
+
+Global Teardown Script (teardown.js):
+
+	module.exports = async () => {
+	  // Cleanly kill the C++ app after tests finish
+	  if (global.__CPP_PROCESS__) {
+		global.__CPP_PROCESS__.kill();
+	  }
+	};
+
+Native Node Test Runner:
+------------------------
+
+To automate this using Node's native test runner (node --test), you can use a global hook script. 
+Node's native runner supports a --test-reporter or an entry file architecture, 
+but the cleanest way to wrap the entire test suite lifecycle without modifying every single file 
+is to use a custom master script or Node's pre-load capabilities.
+
+Here is how to set up the automatic lifecycle directly in your project.
+
+Step 1: Create a Master Test Runner (run-tests.js)
+
+Create a file named run-tests.js in your project root. This script will launch your C++ binary, wait for it to boot,
+invoke Node's native test runner, and ensure the C++ binary is killed even if tests fail.
+
+	const { spawn } = require('child_process');
+
+	// 1. Start the C++ executable in the background
+	const cppProcess = spawn('./my_cpp_executable', [], {
+	  stdio: 'inherit' // Forwards C++ stdout/stderr to your terminal
+	});
+
+	// Helper to clean up the C++ process safely
+	function cleanup() {
+	  if (cppProcess && !cppProcess.killed) {
+		console.log('\nStopping C++ executable...');
+		cppProcess.kill('SIGTERM');
+	  }
+	}
+
+	// Ensure cleanup runs if the main script gets interrupted (Ctrl+C)
+	process.on('SIGINT', () => { cleanup(); process.exit(1); });
+	process.on('SIGTERM', () => { cleanup(); process.exit(1); });
+
+	// 2. Wait for the C++ application to initialize
+	// (Adjust the timeout or use a TCP socket check if it takes longer)
+	setTimeout(() => {
+	  console.log('C++ executable ready. Starting Node.js native tests...');
+
+	  // 3. Spawn Node's native test runner
+	  // This looks for all files matching test patterns (e.g., *.test.js)
+	  const testProcess = spawn('node', ['--test'], { stdio: 'inherit' });
+
+	  // 4. Handle test process completion
+	  testProcess.on('close', (code) => {
+		cleanup();
+		process.exit(code); // Exit with the same code as the tests (0 for success)
+	  });
+	}, 2000); // 2-second delay for C++ startup
+
+Step 2: Update Your package.json
+
+Update the test script in your package.json file to point to your new master runner instead of invoking node --test directly:
+
+	{
+	  "scripts": {
+		"test": "node run-tests.js"
+	  }
+	}
+
+Step 3: Run Your Tests
+
+Now, you can execute your entire test pipeline in your single SSH terminal connection using your standard test command:
+
+	npm test
+
+Alternative: Keep C++ Application Separated in Bash
+
+If you prefer not to write JavaScript wrapper code, you can use Node's native test command directly in your shell script. 
+Ensure you trap terminal exits to prevent the C++ app from becoming a "zombie" process if the tests crash:
+
+	# Start C++ app, wait 2 seconds, run native tests, and ensure cleanup happens
+	./my_cpp_executable & CPP_PID=$! && sleep 2 && node --test; EXIT_CODE=$?; kill $CPP_PID; exit $EXIT_CODE
+
+
+<<<<<<< HEAD
+Improve Server Performance:
+---------------------------
+
+Alternatives for system shutdown:
+sudo poweroff
+sudo shutdown -h now
+sudo init 0
+sudo poweroff -f
+
+sudo systemctl suspend
+
+Snapd (snapd.service) is a background service that manages snap packages on Ubuntu.
+  sudo systemctl disable snapd.service
+Unattended Upgrades (unattended-upgrades.service) automatically installs security updates.
+  sudo systemctl disable unattended-upgrades.service
+Multipath Daemon (multipathd.service) manages multipath I/O for storage devices.
+  sudo systemctl disable multipathd.service
+LVM2 Monitoring Daemon (lvm2-monitor.service) monitors LVM volumes.
+  sudo systemctl disable lvm2-monitor.service
+UFW Firewall (ufw.service) manages firewall rules. If you are not using UFW, you can disable it.
+  sudo systemctl disable ufw.service
+
+Free Memory: free -h
+htop interactive process viewer: sudo apt install htop
+systemd-analyze blame
+systemd-analyze critical-chain
+systemctl list-unit-files --state=enabled
+
+sudo systemctl disable --now ModemManager.service udisks2.service polkit.service networkd-dispatcher.service
+
+- ModemManager.service: This scans your system for cellular, 3G, or 4G LTE mobile broadband modems. 
+  It is completely useless on a standard server.
+- udisks2.service: This daemon handles storage operations like auto-mounting USB flash drives or generating desktop drive notifications. 
+  Your server's primary storage (sda) is already mounted by the kernel, so this is not needed.
+- polkit.service: The PolicyKit manager controls system-wide privileges for unprivileged processes (like allowing a desktop user to click a button to Wi-Fi). 
+  On a headless server where you use sudo for administrative actions, this is unnecessary overhead.
+- networkd-dispatcher.service: This listens for changes in your network status to run custom scripts (like executing a script when Wi-Fi disconnects). 
+  If your server has a static network configuration, this serves no purpose
+
+watch -n 1 "grep MHz /proc/cpuinfo"
+
+Good: The numbers should hover close to your CPU's base/minimum frequency (e.g., 800MHz - 1200MHz depending on the chip).
+Bad: If they are sitting at maximum boost speeds (e.g., 3400MHz+) despite zero traffic to Crow, something is artificially forcing them high.
+
+sudo apt install linux-tools-generic  # Install if missing
+sudo cpupower monitor
+
+Look at the table output. If your CPU cores are spending 0% of their time in C6 or C3 and 100% in C0 (active state), your hardware power savings are disabled.
+
+Check Live Hardware Temperatures:
+
+sudo apt install lm-sensors
+sudo sensors-detect  # Press Enter to accept all defaults
+sensors
+=======
+Generate Self-signed Certificate:
+---------------------------------
+1. ip addr show | grep "inet " | grep -v 127
+
+2. create directory: mkdir ~/proj/certs 
+
+3. generate private key and cert:
+
+	openssl req -x509 -newkey rsa:4096 \
+	  -keyout server.key \
+	  -out server.crt \
+	  -days 365 \
+	  -nodes \
+	  -subj "/CN=15.3.21.220" \
+	  -addext "subjectAltName=IP:15.3.21.220"
+	 
+	openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt -days 365 -nodes -subj "/CN=15.15.75.224" -addext "subjectAltName=IP:15.15.75.224"
+	  
+	- or using computer name instead -
+	
+	openssl req -x509 -newkey rsa:4096 \
+	  -keyout server.key \
+	  -out server.crt \
+	  -days 365 \
+	  -nodes \
+	  -subj "/CN=830g7" \
+	  -addext "subjectAltName=DNS:830g7"	
+	 
+     - on Windows -
+
+     openssl req -x509 -newkey rsa:4096 \
+	  -keyout server.key \
+	  -out server.crt \
+	  -days 365 \
+	  -nodes \
+	  -subj "//CN=830g7" \
+	  -addext "subjectAltName=DNS:830g7"
+
+     openssl req -x509 -newkey rsa:4096 -keyout server.key -out server.crt -days 365 -nodes -subj "//CN=830g7" -addext "subjectAltName=DNS:830g7"
+
+4. Verify cert:
+
+	# Confirm both files exist and have reasonable sizes
+	ls -lh ~/projects/certs/
+
+	# Inspect the certificate contents
+	openssl x509 -in server.crt -text -noout | grep -A2 -E "Subject:|Validity|Alt"
+	
+  output:
+  
+	Subject: CN=192.168.1.50
+	Validity
+		Not Before: Aug 13 00:00:00 2026 GMT
+		Not After : Aug 13 00:00:00 2027 GMT
+	X509v3 Subject Alternative Name:
+		IP Address:192.168.1.50  
+
+5. Set permissions:
+
+	# Private key should be readable only by owner
+	chmod 600 ~/proj/certs/server.key
+	chmod 644 ~/proj/certs/server.crt
+
+	# Confirm
+	ls -la ~/proj/certs/
+
+6. Copy the Certificate to Windows for Trusting
+
+	# Copy the certificate from the server to Windows
+	scp engineer@15.3.21.220:~/proj/certs/server.crt C:\Users\%USERNAME%
+
+7. This is required so Chrome and Edge accept it without warnings and allow service workers to register:
+
+	Press Win+R → type certmgr.msc → press Enter
+	Expand Trusted Root Certification Authorities
+	Right click Certificates → All Tasks → Import
+	Click Next → browse to server.crt on your Desktop
+	Click Next → confirm store is Trusted Root Certification Authorities
+	Click Next → Finish
+	Click Yes on the security warning
+
+	Verify it was imported:
+
+	In certmgr, expand Trusted Root Certification Authorities → Certificates
+	Look for an entry with your server IP 192.168.1.50 as the issuer
+
+8. Set cert and key in settings.json
+	
+	{
+	  "port": 8088,
+	  "threads": 2,
+	  "certFile": "~/proj/certs/server.crt",
+	  "keyFile":  "~/proj/certs/server.key"
+	}
+
+/home/eng/proj/certs/server.crt
+/home/eng/proj/certs/server.key
+
+Configure CROW for HTTPS (TLS)
+------------------------------
+
+1. Review current Crow
+
+	# Look at your project structure
+	find ~/projects/toy-cpp -type f | sort
+
+	# View your main CROW application file
+	cat ~/projects/toy-cpp/src/main.cpp
+	
+	result:
+	
+		version.h:
+
+		#pragma once
+		namespace crow
+		{
+			constexpr const char VERSION[] = "master";
+		}
+		
+	a. on "master", more queries
+	
+		# Check for SSL header
+		ls ~/projects/crow/include/crow/ | grep -i ssl
+
+		# Check for SSL in the main app header
+		grep -i ssl ~/projects/crow/include/crow/app.h | head -20
+
+		# View your CMakeLists.txt
+		cat ~/projects/toy-cpp/CMakeLists.txt
+
+		# View your main application file
+		cat ~/projects/toy-cpp/src/main.cpp	
+
+2. Confirm SSL support
+
+	# Check CROW version
+	cat ~/projects/crow/include/crow/version.h
+
+	# Confirm SSL header exists
+	ls ~/projects/crow/include/crow/ | grep -i ssl
+
+3. Check CMakeLists.txt
+
+	cat ~/projects/toy-cpp/CMakeLists.txt
+	
+
+Ubuntu Password Confirmation:
+-----------------------------
+Password status:
+  sudo passwd -S your_username
+Last auth attempt:
+  sudo grep -E "Accepted|Failed" /var/log/auth.log
+
+>>>>>>> 2e17a389ef75ae63be1593536132ae9091cca8fc
+
+Debugging TLS Issues in CROW:
+-----------------------------
+
+openssl s_client -connect 127.0.0.1:443 -msg
+curl -v https://127.0.0.1:8088
+curl -k -v https://127.0.0.1:8088
+
+Revisiting Settings and Configuration
+-------------------------------------
+
+settings.json: /etc/toy/settings.json
+
+{
+  "port": 8088,
+  "threads": 2,
+  "cert_path":  "/etc/ssl/certs/server.crt",
+  "key_path":   "/etc/ssl/private/server.key",
+  "data_path":  "/var/lib/toy/toy.dat",
+  "static_dir": "/var/lib/toy/www"
+}
+
+daemon changes:
+  sudo nano /etc/systemd/system/toy.service
+
+  WorkingDirectory=/home/eng/proj/toy-cpp
+  WorkingDirectory=/home/eng/proj/toy-cpp/build
+
+  sudo systemctl daemon-reload
+  sudo systemctl restart toy.service
+  sudo systemctl status toy.service
+
+[Service]
+ExecStart=/home/eng/proj/toy-cpp/build/toy-server --config /etc/toy/settings.json
+WorkingDirectory=/home/eng/proj/toy-cpp/build
+
+sudo mkdir -p /etc/toy /var/lib/toy
+sudo cp /home/eng/proj/toy-cpp/settings.json /etc/toy/settings.json
+sudo cp /home/eng/proj/toy-cpp/toy.dat /var/lib/toy/toy.dat
+sudo chown eng:eng /etc/toy/settings.json /var/lib/toy/toy.dat
+
+deployment directories:
+
+settings: /etc/toy/settings.json
+exe:      /usr/local/bin/toy
+pwa:      /var/lib/toy/www
+cert:     /etc/ssl/certs/server.crt
+key:      /etc/ssl/private/server.key
+
+Permissions:
+
+server.crt — not sensitive; it's the public half of the pair, meant to be presented to anyone who connects.
+
+    chmod 644 /etc/toy/certs/server.crt
+
+server.key — this is the one that actually matters. Compromise of this file lets someone impersonate your server entirely.
+
+    chmod 600 /etc/toy/private/server.key
+    chown eng:eng /etc/toy/private/server.key
+
+600 = owner read/write only, nobody else on the system can read it — including other unprivileged users, if this box is ever shared or compromised at a lower level.
+Directory permissions matter too, not just the file — a 600 file inside a world-listable/readable directory is less protected than it looks, since directory permissions govern whether the file can even be found/traversed to in the first place:
+
+    chmod 700 /etc/toy/private
+    chmod 755 /etc/toy/certs
+
+700 on private/ means only the owner (eng) can list, enter, or access anything inside it at all — certs/ can stay more open (755) since nothing inside it is sensitive.
+
+Cmake Append for Install Capability
+-----------------------------------
+
+# ── Simplified Deployment Layout with Permissions ─────────────────────────────
+
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "/opt/toy" CACHE PATH "Unified deployment path" FORCE)
+endif()
+
+# 1. Install executable (Read/Write/Execute for Owner, Read/Execute for Group/Others)
+install(TARGETS toy-server RUNTIME DESTINATION bin
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+
+# 2. Install settings.json
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/settings.json" DESTINATION etc
+    PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
+
+# 3. Install the PWA asset directory contents
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/pwa/" DESTINATION www)
+
+# 4. Install SSL Certificates with Strict Permissions (Locked down to Owner)
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/certs/server.crt" DESTINATION certs
+    PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ)
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/certs/server.key" DESTINATION certs
+    PERMISSIONS OWNER_READ OWNER_WRITE) # Strict 600 equivalent
+
+Logging:
+--------
+
+On modern Ubuntu systems, systemd automatically captures everything written to stdout (standard output) 
+and stderr (standard error) by a daemon and routes it directly to the system journal (journald).
+
+This is a core tenet of modern "Cloud Native" and Twelve-Factor App design patterns: 
+applications should treat logs as event streams and simply write them unbuffered to the console.
+
+When you configure your Crow app to run as a background service, you will create a systemd service unit file (e.g., /etc/systemd/system/myapp.service).
+By default, systemd takes care of the capture. Your service file can be as simple as this:
+
+    [Unit]
+    Description=Crow PWA Application
+    After=network.target
+
+    [Service]
+    Type=simple
+    ExecStart=/usr/local/bin/myapp
+    Restart=on-failure
+    User=myappuser
+
+    # Optional: Tags your logs in the journal
+    SyslogIdentifier=myapp
+
+    [Install]
+    WantedBy=multi-user.target
+
+How to Read the Captured Logs:
+
+Tail logs in real-time (like tail -f):
+    journalctl -u myapp.service -f
+
+View logs from today only:
+    journalctl -u myapp.service --since today
+
+Filter to show only errors (stderr entries):
+    journalctl -u myapp.service -p err
+
+Key Advantages of Relying on stdout/stderr:
+
+1. Automatic Log Rotation: journald manages log sizes natively. It will automatically compress logs and rotate them out when they reach a certain disk percentage, preventing your server from running out of space.
+2. Standardized Formatting: Systemd automatically prepends timestamps and the service name to every single line your app outputs.
+3. No File Permission Headaches: Your Crow app doesn't need write permissions to /var/log/ or a custom log directory. It just writes to its own console stream, increasing security.
+4. Centralized Log Management: All logs from different services are aggregated in one place, making it easier to monitor and analyze system behavior.
+5. Integration with Monitoring Tools: Many modern monitoring and alerting tools (like Prometheus, Grafana, or ELK stack) can directly ingest logs from journald, enabling real-time observability.
+6. Simplified Deployment: By writing logs to stdout/stderr, you avoid the complexity of managing separate log files, permissions, and rotation policies.
+7. Consistency Across Environments: Whether you're running your app in development, staging, or production, the logging behavior remains consistent, reducing surprises when moving between environments.
+8. Easy Debugging: When debugging issues, you can quickly access the logs without needing to SSH into the server and navigate to log directories.
+9. Reduced Disk I/O: Writing to stdout/stderr is generally more efficient than writing to disk, especially when journald is configured to store logs in memory or a fast storage medium.
+10. Future-Proofing: As your application scales or moves to containerized environments (like Docker or Kubernetes), relying on stdout/stderr aligns with best practices for cloud-native applications.
+
+Because C++ standard output (std::cout) is buffered by default when not running in an interactive terminal, logs might not appear in journalctl immediately.
+To fix this and get real-time log capturing, ensure you flush the stream or use std::endl instead of \n, or disable buffering entirely at the start of your main() function:
+
+    #include <iostream>
+
+    int main() {
+        // Disable stdout buffering so logs stream instantly to systemd
+        std::setvbuf(stdout, NULL, _IONBF, 0); 
+    
+        // Your Crow application code...
+    }
+
+Simplified systemd Service File:
+--------------------------------
+
+[Unit]
+Description=ToY - Thinking of You Web Service
+After=network.target
+
+[Service]
+Type=simple
+# Ensure the app executes with its asset directories natively relative to its root
+WorkingDirectory=/opt/toy
+ExecStart=/opt/toy/bin/toy-server
+
+# Restart tracking
+Restart=on-failure
+RestartSec=5s
+
+# Security practices (Optional: Run as a non-root user if your app binds to ports > 1024)
+# User=toyuser
+# Group=toyuser
+
+[Install]
+WantedBy=multi-user.target
+
+Install and activate service-worker
+-----------------------------------
+sudo cp toy.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable toy
+sudo systemctl start toy
+
+Management:
+Check live application logs: sudo journalctl -u toy -f
+Check application status: sudo systemctl status toy
+Restart the application: sudo systemctl restart toy
+
+Q: should service file also be deployable?
+   would a script help with calls to systemctl?
+
+Simplified ToY Structure:
+-------------------------
+/opt/toy/
+├── bin/
+│   └── toy-server
+├── etc/
+│   └── settings.json
+├── www/
+│   ├── index.html
+│   ├── app.js
+│   └── (other PWA files)
+└── certs/
+    ├── server.crt
+    └── server.key
+
+
+
+
+Server Optimization Summary:
+============================
+NOTE: CONFIRM WITH CLAUDE BEFORE MAKING ANY CHANGES TO THE SERVER
+
+Key Performance Tuning Vectors:
+-------------------------------
+
+Since your objective is simulating a real workload on this mobile workstation, here are three high-value areas to tune that will impact your specific architecture far more than any display configurations:
+
+1. Swap Aggressiveness (vm.swappiness)
+
+Because your database relies on memory-mapped files, Linux might try to aggressively swap out anonymous memory (like your std::unordered_map indexes) to make room for file-backed page caches.
+
+- To prevent your indexes from dropping to disk, force Linux to favor keeping anonymous memory in RAM:sudo sysctl vm.swappiness=10
+
+2. Maximum Memory Map Mappings
+
+By default, the Linux kernel limits a single process to 65,530 memory mappings (vm.max_map_count).
+
+If your game simulation scales up and opens numerous fixed-size array segments concurrently, your CROW server could crash with an Out-of-Memory or bad allocation error.
+- Check your limit: cat /proc/sys/vm/max_map_count
+- If needed, double or triple it by appending vm.max_map_count=262144 to /etc/sysctl.conf.
+
+3. Consider an Alternate Allocator for std::unordered_map
+
+The default glibc allocator (ptmalloc) can cause severe memory fragmentation when an std::unordered_map grows, shrinks, or rehashes. 
+If you notice your memory footprint creeping up unnaturally during simulation:
+
+- Link your CROW application against jemalloc or TCMalloc. These modern allocators manage small node allocations much more efficiently and will provide a much truer simulation of a production-grade in-memory database wrapper.
+
+Configuring Huge Pages for std::unordered_map
+---------------------------------------------
+
+By default, the Linux kernel manages memory in tiny 4KB chunks (pages). 
+Because an std::unordered_map creates thousands of small node allocations scattered across RAM, the CPU has to constantly look up page mappings in its Translation Lookaside Buffer (TLB), causing "TLB misses" that slow down lookups.
+
+By enabling Huge Pages (usually 2MB), you reduce the sheer number of page entries the CPU has to track by a factor of 500, significantly speeding up random memory access.
+
+Step 1: Check Your CPU's Default Huge Page Size
+
+Run this command to see what size Huge Pages your system supports and if any are already active:
+
+  grep Huge /proc/meminfo
+
+- Look at Hugepagesize:. On x86_64 systems, it will almost always say 2048 kB (2MB).
+
+- Take note of HugePages_Total: 0, which means none are allocated yet.
+
+Step 2: Calculate How Many Pages to Allocate
+
+Since Huge Pages must be locked into physical RAM and cannot be swapped out, you need to dedicate a specific portion of your RAM to them.
+
+- Example: If you want to reserve 4GB of RAM for your application's memory pool, and your page size is 2MB: 4096 MB / 2 MB = 2048 Huge Pages.
+
+Step 3: Allocate the Huge Pages Dynamically (Temporary Test)
+
+Before making changes permanent, test the allocation on your running server:
+
+  sudo sysctl -w vm.nr_hugepages=2048
+
+Run grep Huge /proc/meminfo again. You should now see HugePages_Total: 2048 and HugePages_Free: 2048.
+
+Step 4: Make the Allocation Permanent
+
+If your game simulation runs smoothly with the allocation, ensure the settings persist across system reboots:
+
+1. Open the sysctl configuration file:
+
+  sudo nano /etc/sysctl.conf
+
+2. Add this line to the very bottom of the file:
+
+  vm.nr_hugepages=2048
+
+3. Save and exit (Ctrl+O, Enter, Ctrl+X).
+  
+Step 5: Informing Your C++ Application
+
+Standard C++ allocations (new or malloc) do not automatically use Huge Pages. 
+To make your std::unordered_map utilize them, you have two primary options:
+
+- Option A (Transparent Huge Pages - Easiest): 
+
+  You can tell the Linux kernel to automatically merge standard 4KB pages into Huge Pages in the background when it notices large contiguous memory blocks.
+  Ensure it is enabled system-wide by running:
+
+  echo always | sudo tee /sys/kernel/mm/transparent_hugepage/enabled
+
+- Option B (Custom C++ Allocator - Best Performance): 
+
+  For maximum control, pass a custom allocator to your std::unordered_map declaration that uses mmap with the MAP_HUGETLB flag to explicitly request the pre-allocated huge page blocks you configured in Step 3.
+
+Why This Profile Is Perfect for Your Architecture
+-------------------------------------------------
+
+- Massive Indexing Ceiling: 
+  The default std::unordered_map in C++ has an overhead of roughly 24 to 32 bytes per node (excluding your actual game struct data) just to handle bucket pointers. 
+  With 17.5GB free, your system can easily maintain tens of millions of active index nodes simultaneously without breaking a sweat.
+
+- Maximum OS Page Cache Acceleration: 
+  Since your dataset uses memory-mapped files (mmap), the Linux kernel will seamlessly consume your unused RAM to cache those files directly into physical memory (buff/cache). 
+  This means your disk-backed files will read and write at raw RAM speeds (nanoseconds instead of milliseconds), effectively turning your file storage into a high-performance in-memory database.
+
+Two Critical Reminders for Your 18GB Layout
+
+Because you plan to test Huge Pages on this specific hardware configuration, keep these two system traits in mind:
+
+1. Do Not Over-Allocate Your Huge Pages: Huge Pages permanently lock a chunk of physical memory away from the operating system. 
+   If you allocate a 12GB Huge Page pool (vm.nr_hugepages=6144), your available system RAM instantly drops to 6GB. 
+   Ensure you leave at least 2GB entirely unallocated for standard OS functions, network buffers, and your CROW web server's core stack.
+
+2. Watch for Fragmentation During Allocation: 
+   Because this server is a mobile workstation, its memory controller might handle physical memory routing across non-contiguous layouts. 
+   If you try to allocate a large number of Huge Pages after the server has been running for days, the command might fail because it cannot find enough continuous chunks of raw memory. 
+   Always allocate your Huge Pages immediately after a clean boot.
+   
+   
+Tuning CROW Application
+-----------------------
+
+Tune CROW's concurrency model, minimize dynamic allocations in handlers and enforce system-level resource caps via cgroups or systemd-analyze
+
+App-Level Tuning:
+- Limit Concurrency: Reduce the number of worker threads
+- Reuse Objects: Pre-allocate JSON responses or use object pools rather than instantiating new crow::json::wvalue on every request
+- Avoid String Copying: Pass request bodies and strings by const reference inside lambda handlers to reduce memory churn
+
+Server-Level Config:
+
+- Systemd Memory Limits: Add MemoryMax=512M or MemoryHigh=400M to your applications systemd service file to safely contain memory spikes and prevent kernel OOM cascades
+- Lower swappiness: Reduce kernel aggressiveness in swapping memory by setting vm.swappiness = 10 in /etc/sysctl.conf
+
+
+Setting up Static NAT (Network Address Translation) Switch:
+-----------------------------------------------------------
+
+find available: route print
+find unused IPv4 address space/block
+verify with: nslookup 10.213.111.1
+
+I find 10.10.10.1 is available
+
+# 1. Create the internal management switch
+New-VMSwitch -Name "StaticNATSwitch" -SwitchType Internal
+
+# 2. Assign the .1 gateway IP address to your Windows host
+New-NetIPAddress -IPAddress 10.10.10.1 -PrefixLength 24 -InterfaceAlias "vEthernet (StaticNATSwitch)"
+
+# 3. Enable NAT so your VM can pull dependencies over your active internet connection
+New-NetNat -Name "StaticNATNetwork" -InternalIPInterfaceAddressPrefix 10.10.10.0/24
+
+Teardown:
+
+Remove-NetNat -Name "StaticNATNetwork" -Confirm:$false
+
+Remove-NetIPAddress -InterfaceAlias "vEthernet (StaticNATSwitch)" -Confirm:$false
+
+Remove-VMSwitch -Name "StaticNATSwitch" -Force
+
+
+Host-only switch with no corporate access: (no internet access either)
+------------------------------------------
+
+# Create a brand new, isolated Internal Switch
+New-VMSwitch -Name "HostOnlySwitch" -SwitchType Internal
+
+# Assign your Windows Host a predictable gateway node address
+New-NetIPAddress -IPAddress 10.10.10.1 -PrefixLength 24 -InterfaceAlias "vEthernet (HostOnlySwitch)"
+
+sudo nano /etc/netplan/01-netcfg.yaml
+
+	network:
+	  version: 2
+	  renderer: networkd
+	  ethernets:
+		eth0:  # <-- Match your interface name
+		  dhcp4: no
+		  addresses:
+			- 10.10.10.1/24
+		  optional: true  # <-- Add this line
+
+sudo netplan apply
+
+- or instead of optional above -
+
+# Disable the service so it doesn't run automatically
+sudo systemctl disable systemd-networkd-wait-online.service
+
+# Mask the service so no other background applications can force it to start
+sudo systemctl mask systemd-networkd-wait-online.service
+
+
+

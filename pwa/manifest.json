@@ -1,0 +1,13 @@
+{
+  "name": "ToY — Thinking of You",
+  "short_name": "ToY",
+  "description": "A quiet way to know when you're both thinking of each other.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAF7F4",
+  "theme_color": "#FAF7F4",
+  "icons": [
+    { "src": "/icon.png?v=2", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon.png?v=2", "sizes": "512x512", "type": "image/png" }
+  ]
+}

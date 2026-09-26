@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#FAF7F4" />
+  <title>ToY — Thinking of You</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/icon.png?v=2" />
+  <link rel="apple-touch-icon" href="/icon.png?v=2" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <main class="shell">
+
+    <div class="mark" aria-hidden="true">
+      <span class="mark__circle mark__circle--soft"></span>
+      <span class="mark__circle mark__circle--accent"></span>
+    </div>
+
+    <!-- ── Register view ─────────────────────────────────────────────── -->
+    <section id="view-register" class="view" hidden>
+      <h1 class="title">ToY</h1>
+      <p class="subtitle">Thinking of You</p>
+
+      <form id="register-form" class="card" novalidate>
+        <label class="field">
+          <span class="field__label">Your name</span>
+          <input
+            id="name-input"
+            class="field__input"
+            type="text"
+            name="name"
+            autocomplete="off"
+            maxlength="27"
+            placeholder="Alex"
+            required
+          />
+        </label>
+
+        <p id="register-error" class="error" role="alert" hidden></p>
+
+        <button id="register-submit" class="button" type="submit">
+          Get started
+        </button>
+
+        <p class="fine-print">
+          Your name identifies you to the person you play with.
+          There's no password — this device is your key.
+        </p>
+      </form>
+    </section>
+
+    <!-- ── Home view ─────────────────────────────────────────────────── -->
+    <section id="view-home" class="view" hidden>
+      <div class="card">
+        <p class="eyebrow">Signed in as</p>
+        <h1 class="title title--home" id="home-name"></h1>
+
+        <p id="home-status" class="status" hidden></p>
+        <p id="home-empty" class="subtitle subtitle--muted">
+          Share your name with a partner, or search theirs to start a game.
+        </p>
+
+        <div id="home-invitations" class="game-group" hidden>
+          <p class="eyebrow">Waiting for your response</p>
+          <ul id="invitations-list" class="game-list"></ul>
+        </div>
+
+        <div id="home-sent" class="game-group" hidden>
+          <p class="eyebrow">Invitations sent</p>
+          <ul id="sent-list" class="game-list"></ul>
+        </div>
+
+        <div id="home-active" class="game-group" hidden>
+          <p class="eyebrow">Games</p>
+          <ul id="active-list" class="game-list"></ul>
+        </div>
+
+        <button id="find-partner" class="button" type="button">
+          Find a partner
+        </button>
+      </div>
+    </section>
+
+    <!-- ── Search view ───────────────────────────────────────────────── -->
+    <section id="view-search" class="view" hidden>
+      <div class="card">
+        <button id="search-back" class="link-back" type="button">
+          ← Back
+        </button>
+
+        <h1 class="title title--home">Find a partner</h1>
+        <p class="subtitle subtitle--muted">Enter their exact ToY name.</p>
+
+        <form id="search-form" novalidate>
+          <label class="field">
+            <span class="field__label">Partner's name</span>
+            <input
+              id="search-input"
+              class="field__input"
+              type="text"
+              autocomplete="off"
+              maxlength="27"
+              placeholder="Jordan"
+              required
+            />
+          </label>
+
+          <p id="search-error" class="error" role="alert" hidden></p>
+
+          <button id="search-submit" class="button" type="submit">
+            Search
+          </button>
+
+          <p class="fine-print">
+            Ask them what name they registered with — it has to match exactly.
+          </p>
+        </form>
+
+        <div id="search-result" class="result" hidden>
+          <p class="eyebrow">Found</p>
+          <p class="result__name" id="result-name"></p>
+
+          <p id="start-game-error" class="error" role="alert" hidden></p>
+
+          <button id="start-game" class="button" type="button">
+            Start a game
+          </button>
+          <button id="search-again" class="button button--ghost" type="button">
+            Search again
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Game detail view ──────────────────────────────────────────── -->
+    <section id="view-game" class="view" hidden>
+      <div class="card">
+        <button id="game-back" class="link-back" type="button">
+          ← Back
+        </button>
+
+        <h1 class="title title--home" id="game-title"></h1>
+
+        <button id="send-event" class="button" type="button">
+          Thinking of you
+        </button>
+
+        <p id="send-event-status" class="status" hidden></p>
+        <p id="send-event-error" class="error" role="alert" hidden></p>
+
+        <p class="eyebrow">History</p>
+        <p id="game-log-empty" class="subtitle subtitle--muted">
+          No moments sent yet.
+        </p>
+        <ul id="game-log" class="game-log" hidden></ul>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
