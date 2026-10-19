@@ -322,6 +322,34 @@ body {
   flex-shrink: 0;
 }
 
+/* ── Device code (use on another device) ─────────────────────────────── */
+
+.device-code {
+  width: 100%;
+  text-align: left;
+  margin-top: 4px;
+}
+
+.device-code[hidden] { display: none; }
+
+.device-code__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+}
+
+.device-code__value {
+  flex: 1;
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+
 /* ── Clickable game row (active games -> game detail) ────────────────── */
 
 .game-row-button {
@@ -377,8 +405,27 @@ body {
 /* Nested inside .card (unlike #register-form, which IS a .card), so it
    needs its own gap between the field, error, and submit button. */
 
-#search-form {
+#search-form,
+#restore-form {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* ── Plain text link (secondary navigation, e.g. register -> join) ───── */
+
+.text-link {
+  margin-top: 18px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.text-link:hover { color: var(--accent); }
+
+.text-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
 }

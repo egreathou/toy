@@ -54,6 +54,22 @@ const Api = {
     return body; // { id, name, token }
   },
 
+  // Takes an explicit token rather than reading Session, since at the point
+  // this is called (restoring on a fresh device) there is no session yet.
+  async whoAmI(token) {
+    const res = await fetch('/api/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    const body = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new ApiError(res.status, body.error || 'Something went wrong.');
+    }
+
+    return body; // { id, name }
+  },
+
   async searchUser(name) {
     const res = await fetch(`/api/users/search?name=${encodeURIComponent(name)}`, {
       headers: authHeader(),
@@ -168,6 +184,14 @@ function registerErrorMessage(err) {
   }
 }
 
+// Maps a failed restore-from-code attempt onto a message a person can act on.
+function restoreErrorMessage(err) {
+  switch (err.status) {
+    case 401: return "That code didn't work. Check that you copied all of it.";
+    default:  return 'Could not reach the server. Check your connection and try again.';
+  }
+}
+
 // Maps a failed partner search onto a message a person can act on.
 function searchErrorMessage(err) {
   switch (err.status) {
@@ -217,6 +241,7 @@ const Views = {
   home:     document.getElementById('view-home'),
   search:   document.getElementById('view-search'),
   game:     document.getElementById('view-game'),
+  restore:  document.getElementById('view-restore'),
 };
 
 function showView(name) {
@@ -266,6 +291,70 @@ registerForm.addEventListener('submit', async (event) => {
   } finally {
     registerSubmit.disabled = false;
     nameInput.disabled = false;
+  }
+});
+
+// ── Join from another device (same device-key model, second device) ───────────
+// There's no password to recover — the token already stored on your first
+// device IS the credential. This just lets you copy it onto a second one.
+
+const showRestore    = document.getElementById('show-restore');
+const hideRestore     = document.getElementById('hide-restore');
+const restoreForm     = document.getElementById('restore-form');
+const restoreInput    = document.getElementById('restore-input');
+const restoreSubmit   = document.getElementById('restore-submit');
+const restoreError    = document.getElementById('restore-error');
+
+function showRestoreError(message) {
+  restoreError.textContent = message;
+  restoreError.hidden = false;
+}
+
+function clearRestoreError() {
+  restoreError.hidden = true;
+  restoreError.textContent = '';
+}
+
+// A plain link rather than a button — it's navigation, not an action.
+// preventDefault keeps the href="#" from touching the URL or scroll position.
+showRestore.addEventListener('click', (event) => {
+  event.preventDefault();
+  restoreInput.value = '';
+  clearRestoreError();
+  showView('restore');
+  restoreInput.focus();
+});
+
+hideRestore.addEventListener('click', () => {
+  showView('register');
+});
+
+restoreForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  clearRestoreError();
+
+  const token = restoreInput.value.trim();
+  if (!token) {
+    showRestoreError('Paste your code to continue.');
+    return;
+  }
+
+  restoreSubmit.disabled = true;
+  restoreInput.disabled = true;
+
+  try {
+    const identity = await Api.whoAmI(token);
+    const user = { id: identity.id, name: identity.name, token };
+    Session.set(user);
+    restoreInput.value = '';
+    enterHome(user);
+  } catch (err) {
+    showRestoreError(err instanceof ApiError
+      ? restoreErrorMessage(err)
+      : 'Could not reach the server. Check your connection and try again.');
+  } finally {
+    restoreSubmit.disabled = false;
+    restoreInput.disabled = false;
   }
 });
 
@@ -407,6 +496,34 @@ async function refreshHomeGames() {
 findPartner.addEventListener('click', () => {
   resetSearchView();
   showView('search');
+});
+
+// ── Device code panel (use on another device) ────────────────────────────
+// The token already in this device's Session IS the credential — this just
+// surfaces it so it can be copied onto a second device's restore screen.
+
+const showDeviceCode      = document.getElementById('show-device-code');
+const deviceCodePanel     = document.getElementById('device-code-panel');
+const deviceCodeValue     = document.getElementById('device-code-value');
+const copyDeviceCode      = document.getElementById('copy-device-code');
+const copyDeviceCodeStatus = document.getElementById('copy-device-code-status');
+
+showDeviceCode.addEventListener('click', () => {
+  deviceCodeValue.textContent = Session.get()?.token ?? '';
+  copyDeviceCodeStatus.hidden = true;
+  deviceCodePanel.hidden = !deviceCodePanel.hidden;
+});
+
+copyDeviceCode.addEventListener('click', async () => {
+  const token = Session.get()?.token ?? '';
+  try {
+    await navigator.clipboard.writeText(token);
+  } catch {
+    // Clipboard access can be denied (permissions, non-HTTPS context, etc.)
+    // — the value is already selectable text on screen either way, so this
+    // is a convenience that degrades gracefully, not a hard requirement.
+  }
+  copyDeviceCodeStatus.hidden = false;
 });
 
 // ── Search view ──────────────────────────────────────────────────────────

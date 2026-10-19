@@ -50,6 +50,45 @@
           There's no password — this device is your key.
         </p>
       </form>
+
+      <a id="show-restore" class="text-link" href="#">
+        Already use ToY on another device? Join with your code
+      </a>
+    </section>
+
+    <!-- ── Join from another device view ─────────────────────────────── -->
+    <section id="view-restore" class="view" hidden>
+      <div class="card">
+        <button id="hide-restore" class="link-back" type="button">
+          ← Back
+        </button>
+
+        <h1 class="title title--home">Join from another device</h1>
+        <p class="subtitle subtitle--muted">
+          On your other device, open ToY and choose "Use on another device"
+          to see your code. Paste it here.
+        </p>
+
+        <form id="restore-form" novalidate>
+          <label class="field">
+            <span class="field__label">Your code</span>
+            <input
+              id="restore-input"
+              class="field__input"
+              type="text"
+              autocomplete="off"
+              placeholder="Paste your code"
+              required
+            />
+          </label>
+
+          <p id="restore-error" class="error" role="alert" hidden></p>
+
+          <button id="restore-submit" class="button" type="submit">
+            Join
+          </button>
+        </form>
+      </div>
     </section>
 
     <!-- ── Home view ─────────────────────────────────────────────────── -->
@@ -81,6 +120,25 @@
         <button id="find-partner" class="button" type="button">
           Find a partner
         </button>
+
+        <button id="show-device-code" class="link-back" type="button">
+          Use on another device
+        </button>
+
+        <div id="device-code-panel" class="device-code" hidden>
+          <p class="fine-print">
+            On your other device, choose "Already use ToY on another device?"
+            and paste this code to use ToY there too — both devices stay
+            signed in as you.
+          </p>
+          <div class="device-code__row">
+            <span id="device-code-value" class="device-code__value"></span>
+            <button id="copy-device-code" class="button button--small" type="button">
+              Copy
+            </button>
+          </div>
+          <p id="copy-device-code-status" class="fine-print" hidden>Copied.</p>
+        </div>
       </div>
     </section>
 
