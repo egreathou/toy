@@ -28,9 +28,9 @@ namespace fs = std::filesystem; // for OpenDataFile
 // C++17 Inline Variable: Safe to put directly in the header
 // ── Constants ────────────────────────────────────────────────────────────────
 
-inline constexpr uint32_t USER_CAPACITY          = 100;
-inline constexpr uint32_t GAME_CAPACITY          = 200;
-inline constexpr uint32_t EVENT_CAPACITY         = 300;
+inline constexpr uint32_t USER_CAPACITY          = 500;
+inline constexpr uint32_t GAME_CAPACITY          = 1000;
+inline constexpr uint32_t EVENT_CAPACITY         = 50000;
 inline constexpr uint32_t MATCH_SPAN_SECONDS     = 3600;
 inline constexpr uint32_t SWEEP_INTERVAL_SECONDS = 60; // how often expired events are swept
 inline constexpr uint32_t MAX_GAMES_PER_PLAYER   = 10;

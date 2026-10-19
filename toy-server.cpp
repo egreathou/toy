@@ -202,6 +202,26 @@ void RegisterRoutes(App& app) {
             });
             });
 
+    // ── Who am I ─────────────────────────────────────────────────────────────
+    // GET /api/me
+    // Resolves identity from the Bearer token alone. This is what lets a
+    // second device restore a session from just a pasted token, without
+    // needing the full {id, name, token} blob — the token alone is enough
+    // to look up the rest.
+
+    CROW_ROUTE(app, "/api/me")
+        ([&app](const crow::request& req) {
+        auto& ctx = app.get_context<AuthMiddleware>(req);
+        if (ctx.userId == UINT32_MAX)
+            return ErrorResponse(401, "Unauthorized");
+
+        std::shared_lock lock(data_mutex);
+        return OkResponse({
+            { "id",   ctx.userId                      },
+            { "name", users[ctx.userId].name.data()   }
+            });
+            });
+
     // ── Create a game ─────────────────────────────────────────────────────────
     // POST /api/games
     // Body: { "partnerId": 1 }
