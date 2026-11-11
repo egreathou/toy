@@ -2015,4 +2015,17 @@ sudo systemctl disable systemd-networkd-wait-online.service
 sudo systemctl mask systemd-networkd-wait-online.service
 
 
+=======================
 
+ZROK Setup:
+-----------
+
+-- install zrok
+mkdir /tmp/zrok2 && cd /tmp/zrok2
+curl -L -O https://github.com/openziti/zrok/releases/download/v2.0.9/zrok_2.0.9_linux_arm64.tar.gz
+tar -xf ./zrok*linux*.tar.gz
+sudo install -o root -g root ./zrok2 /usr/local/bin/
+zrok2 version
+
+-- configure zrok
+zrok2 reserve public 127.0.0.1:8088 --backend-mode proxy --backend-domain toy.ericgreathouse.org
