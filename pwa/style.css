@@ -9,6 +9,7 @@
   --text-muted:    #8A8177;
   --accent:        #B8776C;
   --accent-soft:   #EFD9D3;
+  --overlap:       #D4A8A0;
   --error:         #B24A3C;
   --error-soft:    #F6E4E0;
 
@@ -63,29 +64,43 @@ body {
 /* ── Signature mark ───────────────────────────────────────────────────── */
 
 .mark {
-  position: relative;
-  width: 76px;
-  height: 44px;
+    --d: 44px; /* circle diameter */
+    position: relative;
+    width: calc(var(--d) * 1.4375); /* icon proportions: 368/256 */
+    height: var(--d);
+    animation: breathe 5s ease-in-out infinite;
 }
 
-.mark__circle {
-  position: absolute;
-  top: 0;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  animation: breathe 5s ease-in-out infinite;
+.mark__circle,
+.mark__lens {
+    position: absolute;
+    top: 0;
+    width: var(--d);
+    height: var(--d);
+    border-radius: 50%;
 }
 
 .mark__circle--soft {
-  left: 0;
-  background: var(--accent-soft);
+    left: 0;
+    background: var(--accent-soft);
 }
 
 .mark__circle--accent {
-  right: 0;
-  background: var(--accent);
-  animation-delay: 0.4s;
+    right: 0;
+    background: var(--accent);
+}
+
+/* The overlap: a clone of the left circle, clipped to the right circle */
+.mark__lens { right: 0; overflow: hidden; }
+.mark__lens::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: calc(var(--d) * -0.4375);     /* circle centers: 112/256 apart */
+  width: var(--d);
+  height: var(--d);
+  border-radius: 50%;
+  background: var(--overlap);
 }
 
 @keyframes breathe {

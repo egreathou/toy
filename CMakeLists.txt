@@ -173,7 +173,10 @@ set(PWA_FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/pwa/style.css"
     "${CMAKE_CURRENT_SOURCE_DIR}/pwa/manifest.json"
     "${CMAKE_CURRENT_SOURCE_DIR}/pwa/sw.js"
-    "${CMAKE_CURRENT_SOURCE_DIR}/pwa/icon.png"
+    "${CMAKE_CURRENT_SOURCE_DIR}/pwa/icon-v2-192.png"
+	"${CMAKE_CURRENT_SOURCE_DIR}/pwa/icon-v2-512.png"
+	"${CMAKE_CURRENT_SOURCE_DIR}/pwa/icon-v2-maskable-512.png"
+	"${CMAKE_CURRENT_SOURCE_DIR}/pwa/icon-v2-180.png"
 )
 
 add_custom_command(

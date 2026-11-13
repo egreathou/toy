@@ -7,6 +7,7 @@
 #include "crow.h"
 #include "nlohmann/json.hpp"
 #include "toy.h"
+#include <set>
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -14,6 +15,13 @@ namespace fs = std::filesystem;
 #define state (*statePtr)
 
 namespace {
+
+    const std::set<std::string> publicIcons = {
+        "icon-v2-192.png", 
+		"icon-v2-512.png",
+        "icon-v2-maskable-512.png", 
+		"icon-v2-180.png"
+    };
 
     fs::path resolve_path(const std::string& raw_path, const fs::path& base_dir = fs::current_path()) {
         return (base_dir / raw_path).lexically_normal();
@@ -56,7 +64,7 @@ struct AuthMiddleware {
             req.url == "/app.js" ||
             req.url == "/manifest.json" ||
             req.url == "/sw.js" ||
-            req.url == "/icon.png")
+            (req.url.size() > 1 && publicIcons.count(req.url.substr(1))))
             return;
 
         // All other routes require a valid Bearer token
@@ -453,14 +461,11 @@ void RegisterRoutes(App& app) {
         return serve_static_file("sw.js");
             });
 
-    CROW_ROUTE(app, "/icon.png")
-        ([]() {
-        return serve_static_file("icon.png");
-            });
-
     // Catch-all — diagnose unmatched routes
     CROW_ROUTE(app, "/<path>")
         ([](const crow::request& req, std::string path) {
+		if (publicIcons.count(path))
+			return serve_static_file(path);			
         std::string method_str = crow::method_name(req.method);
         printf("[debug] Unmatched route: %s %s\n",
             method_str.c_str(),
