@@ -372,10 +372,19 @@ void RegisterRoutes(App& app) {
 
         auto it = eventsByGame.find(gameId);
         json res = json::array();
+        const int64_t now = static_cast<int64_t>(std::time(nullptr));
 
         if (it != eventsByGame.end()) {
             for (uint32_t eventId : it->second) {
                 const GameEvent& ev = events[eventId];
+
+                const bool mine = (ev.userId == ctx.userId);
+                const bool matched = (ev.matchedEventId != EventStatus::UNMATCHED);
+                const bool expired = (ev.status == EventStatus::EXPIRED) ||
+                    (now - ev.timestamp >= MATCH_SPAN_SECONDS);
+
+                // Partner's pending thought stays hidden until it matches or the window closes
+                if (!mine && !matched && !expired) continue;
 
                 json entry = {
                     { "id",        eventId       },
