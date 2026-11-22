@@ -270,7 +270,7 @@ uint32_t FindMatchableEvent(uint32_t gameId, uint32_t userid, int64_t timestamp)
         if (ev.matchedEventId != EventStatus::UNMATCHED) continue;
 
         int64_t diff = std::abs(timestamp - ev.timestamp);
-        if (diff > 3600)                    break;
+        if (diff > MATCH_SPAN_SECONDS)                    break;
 
         return eid;
     }
